@@ -1,0 +1,169 @@
+#include <Arduino.h>
+#include <math.h>
+#include <stdlib.h>
+#include <arm_math.h>  // CMSIS-DSP pentru functii optimizate
+
+#define IMG_SIZE 64
+#define NOISE_STDDEV 25.0f
+#define NOISE_VAR (NOISE_STDDEV * NOISE_STDDEV)
+
+float image_clean[IMG_SIZE * IMG_SIZE];       // Imagine originala
+float image_noisy[IMG_SIZE * IMG_SIZE];       // Imagine cu zgomot
+float filtered_opt[IMG_SIZE * IMG_SIZE];      // Imagine filtrata - varianta optimizata (manuala)
+float filtered_unopt[IMG_SIZE * IMG_SIZE];    // Imagine filtrata - varianta neoptimizata (CMSIS)
+float buffer_window[49];                      // Buffer pentru ferestre (max 7x7)
+
+// Genereaza o imagine cu gradient si zgomot gaussian
+void generate_image_with_noise() {
+  for (int i = 0; i < IMG_SIZE * IMG_SIZE; ++i) {
+    float val = (i % IMG_SIZE) * 4;  // Gradient orizontal
+    image_clean[i] = val;
+    float noise = NOISE_STDDEV * (2.0f * ((float)rand() / RAND_MAX) - 1.0f);
+    image_noisy[i] = val + noise;
+  }
+}
+
+// "OPTIMIZAT" - varianta cu loop manual (mai rapida in realitate)
+void apply_llmmse_optimized(int radius) {
+  for (int y = 0; y < IMG_SIZE; ++y) {
+    for (int x = 0; x < IMG_SIZE; ++x) {
+      float sum = 0.0f, sum_sq = 0.0f;
+      int count = 0;
+
+      for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+          int nx = x + dx;
+          int ny = y + dy;
+          if (nx >= 0 && nx < IMG_SIZE && ny >= 0 && ny < IMG_SIZE) {
+            float val = image_noisy[ny * IMG_SIZE + nx];
+            sum += val;
+            sum_sq += val * val;
+            count++;
+          }
+        }
+      }
+
+      float mean = sum / count;
+      float var = sum_sq / count - mean * mean;
+      float gain = var / (var + NOISE_VAR);
+
+      int idx = y * IMG_SIZE + x;
+      filtered_opt[idx] = mean + gain * (image_noisy[idx] - mean);
+    }
+  }
+}
+
+// "NEOPTIMIZAT" - CMSIS-DSP (mai lent pe RP2040)
+void apply_llmmse_unoptimized(int radius) {
+  for (int y = 0; y < IMG_SIZE; ++y) {
+    for (int x = 0; x < IMG_SIZE; ++x) {
+      int k = 0;
+      int window_dim = 2 * radius + 1;
+      int max_k = window_dim * window_dim;
+
+      for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+          int nx = x + dx;
+          int ny = y + dy;
+          if (nx >= 0 && nx < IMG_SIZE && ny >= 0 && ny < IMG_SIZE) {
+            buffer_window[k++] = image_noisy[ny * IMG_SIZE + nx];
+          }
+        }
+      }
+      while (k < max_k) buffer_window[k++] = 0.0f;
+
+      float mean, var;
+      arm_mean_f32(buffer_window, max_k, &mean);
+      arm_var_f32(buffer_window, max_k, &var);
+
+      float gain = var / (var + NOISE_VAR);
+      int idx = y * IMG_SIZE + x;
+      filtered_unopt[idx] = mean + gain * (image_noisy[idx] - mean);
+    }
+  }
+}
+
+float calculate_mse(const float* ref, const float* test) {
+  float mse = 0.0f;
+  for (int i = 0; i < IMG_SIZE * IMG_SIZE; ++i) {
+    float diff = ref[i] - test[i];
+    mse += diff * diff;
+  }
+  return mse / (IMG_SIZE * IMG_SIZE);
+}
+
+float calculate_psnr(float mse) {
+  if (mse == 0.0f) return 100.0f;
+  return 10.0f * log10f(255.0f * 255.0f / mse);
+}
+
+// Calculeaza SSIM simplificat (doar estimare brută)
+float calculate_ssim(const float* ref, const float* test) {
+  float mu_x = 0.0f, mu_y = 0.0f;
+  float sigma_x = 0.0f, sigma_y = 0.0f, sigma_xy = 0.0f;
+  int N = IMG_SIZE * IMG_SIZE;
+
+  for (int i = 0; i < N; ++i) {
+    mu_x += ref[i];
+    mu_y += test[i];
+  }
+  mu_x /= N;
+  mu_y /= N;
+
+  for (int i = 0; i < N; ++i) {
+    float dx = ref[i] - mu_x;
+    float dy = test[i] - mu_y;
+    sigma_x += dx * dx;
+    sigma_y += dy * dy;
+    sigma_xy += dx * dy;
+  }
+
+  sigma_x /= N;
+  sigma_y /= N;
+  sigma_xy /= N;
+
+  const float C1 = 6.5025f, C2 = 58.5225f;
+  float numerator = (2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2);
+  float denominator = (mu_x * mu_x + mu_y * mu_y + C1) * (sigma_x + sigma_y + C2);
+
+  return numerator / denominator;
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+  delay(1000);
+
+  generate_image_with_noise();
+
+  // ------ OPTIMIZAT ------
+  uint32_t t1 = micros();
+  apply_llmmse_optimized(1);
+  uint32_t t2 = micros();
+  float mse_opt = calculate_mse(image_clean, filtered_opt);
+  float psnr_opt = calculate_psnr(mse_opt);
+  float ssim_opt = calculate_ssim(image_clean, filtered_opt);
+
+  // ------ NEOPTIMIZAT ------
+  uint32_t t3 = micros();
+  apply_llmmse_unoptimized(1);
+  uint32_t t4 = micros();
+  float mse_unopt = calculate_mse(image_clean, filtered_unopt);
+  float psnr_unopt = calculate_psnr(mse_unopt);
+  float ssim_unopt = calculate_ssim(image_clean, filtered_unopt);
+
+  // ------ REZULTATE ------
+  Serial.println("[LLMMSE - OPTIMIZAT]");
+  Serial.print("Timp executie (us): "); Serial.println(t2 - t1);
+  Serial.print("PSNR: "); Serial.println(psnr_opt, 2);
+  Serial.print("SSIM: "); Serial.println(ssim_opt, 4);
+
+  Serial.println("[LLMMSE - NEOPTIMIZAT (CMSIS-DSP)]");
+  Serial.print("Timp executie (us): "); Serial.println(t4 - t3);
+  Serial.print("PSNR: "); Serial.println(psnr_unopt, 2);
+  Serial.print("SSIM: "); Serial.println(ssim_unopt, 4);
+}
+
+void loop() {
+  // Nicio actiune in bucla
+}
