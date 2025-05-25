@@ -1,0 +1,51 @@
+Optimizarea filtrării LMMSE pe Raspberry Pi Pico 2 W
+
+Ioan FUNIERU
+
+
+Conducător științific: Șef lucr. dr. ing. KERTÉSZ Csaba Zoltán
+
+Abstract: Lucrarea evaluează eficiența optimizării filtrului LLMMSE pe Raspberry Pi Pico 2 W, comparând o implementare clasică și una bazată pe biblioteca CMSIS-DSP. Deși CMSIS-DSP este 
+concepută pentru accelerarea calculelor, varianta clasică s-a dovedit de peste două ori mai rapidă și a oferit o calitate ușor superioară a imaginii. Rezultatele arată că, pe arhitecturi 
+simple precum ARM Cortex-M0+, optimizarea manuală poate fi mai eficientă decât utilizarea funcțiilor standardizate.
+ 
+1. Introducere
+Filtrul LLMMSE (Locally Linear Minimum Mean Square Error) este o tehnică adaptivă de reducere a zgomotului din imagini, care utilizează informația statistică locală pentru a estima 
+valorile corectate ale pixelilor. În esență, el combină într-un mod ponderat valoarea originală a pixelului cu media locală a vecinilor, luând în considerare varianța zgomotului și 
+a regiunii analizate. Este folosit în special în procesarea imaginilor și a secvențelor video datorită capacității sale de a reduce zgomotul fără a introduce artefacte vizuale evidente 
+sau estompări nejustificate, păstrând astfel detaliile importante. Acest tip de filtrare este preferat în aplicații embedded și în sisteme cu resurse limitate datorită eficienței sale 
+și a rezultatelor bune din punct de vedere perceptual și obiectiv. [1] În acest proiect, algoritmul a fost implementat cu ajutorul unui microcontroler Raspberry Pi Pico 2 W cu două 
+nuclee ARM Cortex-M33 și extensii DSP. 
+
+2. Arhitectură hardware și software
+ 	Filtrul LLMMSE a fost implementat în limbaj C pe Raspberry Pi Pico 2 W, echipat cu microcontrolerul RP2040, având două nuclee ARM Cortex-M0+ la 133 MHz și suport pentru extensii 
+DSP și FPU [2]. Codul a fost conceput special pentru a permite compararea directă între o variantă clasică și una optimizată folosind biblioteca CMSIS-DSP [3], cu scopul de a evalua 
+eficiența reală a optimizării prin instrucțiuni dedicate. Performanța este analizată prin măsurători ale timpului de execuție și ale calității filtrării.
+
+3. Algoritmul LLMMSE, optimizarea sa și rezultatele experimentale
+Pentru validarea optimizării, codul a fost structurat astfel încât să permită compararea directă între două implementări ale filtrului LLMMSE: una clasică, cu bucle explicite și 
+calcule directe, și alta bazată pe funcțiile optimizate din biblioteca CMSIS-DSP, precum arm_mean_f32 și arm_var_f32 [3]. Testele efectuate pe Raspberry Pi Pico 2 W, echipat cu procesorul 
+RP2040 (ARM Cortex-M0+), au arătat că varianta clasică rulează de aproximativ 2,1 ori mai rapid decât cea CMSIS (5939 μs față de 12510 μs), obținând totodată rezultate mai bune din punct
+de vedere calitativ: PSNR de 32.50 vs. 31.68 (Peak Signal-to-Noise Ratio – măsoară fidelitatea imaginii reconstruite) și SSIM de 0.9967 vs. 0.9960 (Structural Similarity Index – evaluează s
+imilaritatea structurală între două imagini). Aceste rezultate confirmă că optimizarea manuală este mai eficientă pe arhitecturi precum Cortex-M0+, în timp ce funcțiile CMSIS-DSP sunt 
+concepute în principal pentru procesoare mai performante, precum ARM Cortex-M33 [4], care pot valorifica pe deplin extensiile DSP.
+
+Tabel 1. Rezultate experimentale
+Versiune	    Timp mediu execuție (µs)	  PSNR mediu (dB)	    SSIM mediu
+Optimizată	  5939	                      32.50          	    0.9967
+Neoptimizată	12510	                      31.68	              0.9960
+
+4. Concluzii și perspective
+Rezultatele obținute în urma testării celor două implementări ale filtrului LLMMSE pe Raspberry Pi Pico 2 W arată că varianta clasică, deși nefolosind funcții dedicate, este cu 
+aproximativ 2,1 ori mai rapidă și oferă rezultate ușor mai bune calitativ (PSNR și SSIM) comparativ cu implementarea ce folosește biblioteca CMSIS-DSP. Această diferență evidențiază 
+faptul că, deși CMSIS-DSP este concepută pentru optimizare, beneficiile sale nu se aplică în mod universal pe toate arhitecturile. În special pe microcontrolere cu nuclee mai simple,
+precum ARM Cortex-M0+, o implementare atent optimizată manual poate depăși performanța funcțiilor standardizate. Acest lucru confirmă necesitatea adaptării strategiilor de optimizare 
+la specificul hardware-ului utilizat.
+
+5. Bibliografie
+[1] H. B. Yin, X. Z. Fang, Z. Wei and X. K. Yang, "An Improved Motion-Compensated 3-D LLMMSE Filter With Spatio–Temporal Adaptive Filtering Support," in IEEE Transactions on 
+Circuits and Systems for Video Technology, vol. 17, no. 12, pp. 1714-1727, Dec. 2007, doi: 10.1109/TCSVT.2007.904590.
+[2] Raspberry Pi Ltd., “Raspberry Pi Pico 2 W Datasheet,” https://datasheets.raspberrypi.com/pico2w/pico2w-datasheet.pdf
+[3] Arm Ltd., “CMSIS-DSP Software Library Documentation,” https://developer.arm.com
+[4] ARM, “Cortex-M33 Technical Reference Manual,” https://developer.arm.com/documentation/100235
+
